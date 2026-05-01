@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="SimpleChat.AppHost/SimpleChat.AppHost.csproj" />
+  <Project Path="SimpleChat.ServiceDefaults/SimpleChat.ServiceDefaults.csproj" />
+  <Project Path="SimpleChat/SimpleChat.csproj" />
+</Solution>
