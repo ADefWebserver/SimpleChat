@@ -1,7 +1,11 @@
-﻿@page "/"
+@page "/"
+@using SimpleChat.Components.Chat
 
-<PageTitle>Home</PageTitle>
+<PageTitle>SimpleChat</PageTitle>
 
-<h1>Hello, world!</h1>
-
-Welcome to your new app.
+<div class="chat-shell">
+    <RadzenStack Orientation="Orientation.Vertical" Gap="0.5rem" Style="height: calc(100vh - 130px);">
+        <h1 class="chat-title">SimpleChat</h1>
+        <ChatPanel />
+    </RadzenStack>
+</div>

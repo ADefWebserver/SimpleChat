@@ -9,6 +9,11 @@
 
   <ItemGroup>
     <PackageReference Include="Radzen.Blazor" Version="10.3.2" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.5.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.5.1" />
+    <PackageReference Include="OpenAI" Version="2.10.0" />
+    <PackageReference Include="Azure.AI.OpenAI" Version="2.5.0-beta.1" />
+    <PackageReference Include="Markdig" Version="0.42.0" />
   </ItemGroup>
 
   <ItemGroup>
