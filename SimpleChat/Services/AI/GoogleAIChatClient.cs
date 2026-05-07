@@ -106,13 +106,77 @@ public class GoogleAIChatClient : IChatClient, IDisposable
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // SSE streaming over BrowserHttpHandler is tricky; for now, fall back
-        // to a single non-streaming call and yield the full text once.
-        var full = await GetResponseAsync(chatMessages, options, cancellationToken);
-        var text = full?.Messages?.FirstOrDefault()?.Text;
-        if (!string.IsNullOrEmpty(text))
+        var body = BuildRequestBody(chatMessages, options);
+        var url = $"{BaseUrl}/models/{Uri.EscapeDataString(_modelId)}" +
+                  $":streamGenerateContent?alt=sse&key={Uri.EscapeDataString(_apiKey)}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
         {
-            yield return new ChatResponseUpdate(ChatRole.Assistant, text);
+            Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
+        };
+
+        using var response = await _httpClient.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new HttpRequestException(
+                $"Gemini streamGenerateContent failed ({(int)response.StatusCode} {response.ReasonPhrase}): {raw}");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null) break;
+            if (line.Length == 0) continue;
+            if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+
+            var payload = line.AsSpan(5).Trim().ToString();
+            if (payload.Length == 0 || payload == "[DONE]") continue;
+
+            string? deltaText = null;
+            try
+            {
+                using var doc = JsonDocument.Parse(payload);
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("candidates", out var candidates)
+                    || candidates.ValueKind != JsonValueKind.Array
+                    || candidates.GetArrayLength() == 0)
+                {
+                    continue;
+                }
+
+                var first = candidates[0];
+                if (first.TryGetProperty("content", out var content)
+                    && content.TryGetProperty("parts", out var parts)
+                    && parts.ValueKind == JsonValueKind.Array)
+                {
+                    var sb = new StringBuilder();
+                    foreach (var part in parts.EnumerateArray())
+                    {
+                        if (part.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String)
+                        {
+                            sb.Append(t.GetString());
+                        }
+                    }
+                    if (sb.Length > 0) deltaText = sb.ToString();
+                }
+            }
+            catch (JsonException)
+            {
+                // Ignore malformed SSE chunks.
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(deltaText))
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant, deltaText);
+            }
         }
     }
 

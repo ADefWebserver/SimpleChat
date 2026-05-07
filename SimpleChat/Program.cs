@@ -29,6 +29,22 @@ public class Program
         builder.Services.AddSingleton<ChatClientFactory>();
         builder.Services.AddHttpClient();
         builder.Services.AddHttpClient<AIModelService>();
+
+        // Long timeout for chat completions: reasoning / preview models
+        // (e.g. Gemini Pro preview, Claude Opus, GPT-5) can take well over
+        // the default 100s HttpClient timeout to return a full response.
+        // The standard resilience handler is no longer applied as a default
+        // (see SimpleChat.ServiceDefaults.Extensions), so we only need to
+        // bump HttpClient.Timeout here.
+        builder.Services.AddHttpClient(nameof(GoogleAIChatClient))
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(5));
+        builder.Services.AddHttpClient(nameof(AnthropicChatClient))
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(5));
+        builder.Services.AddHttpClient("OpenAIChatClient")
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(5));
+        builder.Services.AddHttpClient("AzureOpenAIChatClient")
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(5));
+
         builder.Services.AddScoped<ChatService>();
 
         var app = builder.Build();

@@ -141,9 +141,112 @@ public class AnthropicChatClient : IChatClient, IDisposable
         ChatOptions? options = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var response = await GetResponseAsync(chatMessages, options, cancellationToken);
-        var text = response.Messages.Count > 0 ? response.Messages[0].Text : string.Empty;
-        yield return new ChatResponseUpdate(ChatRole.Assistant, text);
+        var systemText = "";
+        var messages = new List<object>();
+
+        foreach (var msg in chatMessages)
+        {
+            if (msg.Role == ChatRole.System)
+            {
+                systemText = msg.Text ?? "";
+            }
+            else if (msg.Role == ChatRole.User)
+            {
+                messages.Add(new { role = "user", content = msg.Text ?? "" });
+            }
+            else if (msg.Role == ChatRole.Assistant)
+            {
+                messages.Add(new { role = "assistant", content = msg.Text ?? "" });
+            }
+        }
+
+        if (messages.Count == 0 && !string.IsNullOrEmpty(systemText))
+        {
+            messages.Add(new { role = "user", content = systemText });
+            systemText = "";
+        }
+
+        var requestBody = new Dictionary<string, object>
+        {
+            ["model"] = _modelId,
+            ["max_tokens"] = 4096,
+            ["messages"] = messages,
+            ["stream"] = true
+        };
+
+        if (!string.IsNullOrEmpty(systemText))
+        {
+            requestBody["system"] = systemText;
+        }
+
+        if (options?.Temperature.HasValue == true
+            && AICapabilities.AnthropicSupportsTemperature(_modelId))
+        {
+            requestBody["temperature"] = options.Temperature.Value;
+        }
+
+        var json = JsonSerializer.Serialize(requestBody);
+        using var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+
+        using var httpResponse = await _httpClient.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+        if (!httpResponse.IsSuccessStatusCode)
+        {
+            var errBody = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
+            throw new HttpRequestException($"Anthropic API error ({httpResponse.StatusCode}): {errBody}");
+        }
+
+        await using var stream = await httpResponse.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null) break;
+            if (line.Length == 0) continue;
+            if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+
+            var payload = line.AsSpan(5).Trim().ToString();
+            if (payload.Length == 0 || payload == "[DONE]") continue;
+
+            string? deltaText = null;
+            try
+            {
+                using var doc = JsonDocument.Parse(payload);
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("type", out var typeProp)
+                    || typeProp.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+                var evtType = typeProp.GetString();
+                if (evtType != "content_block_delta") continue;
+
+                if (root.TryGetProperty("delta", out var delta)
+                    && delta.TryGetProperty("type", out var deltaType)
+                    && deltaType.ValueKind == JsonValueKind.String
+                    && deltaType.GetString() == "text_delta"
+                    && delta.TryGetProperty("text", out var textEl)
+                    && textEl.ValueKind == JsonValueKind.String)
+                {
+                    deltaText = textEl.GetString();
+                }
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(deltaText))
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant, deltaText);
+            }
+        }
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null)

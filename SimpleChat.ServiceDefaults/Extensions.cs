@@ -28,8 +28,12 @@ public static class Extensions
 
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
-            // Turn on resilience by default
-            http.AddStandardResilienceHandler();
+            // NOTE: Standard resilience is intentionally NOT applied here.
+            // Its default TotalRequestTimeout (30s) aborts long-running LLM
+            // completions (Gemini Pro preview, Claude Opus, GPT-5, etc.) and
+            // is the source of the '00:00:30' Polly TimeoutRejectedException
+            // we were seeing. If a specific internal HTTP client needs
+            // resilience, opt-in per client with AddStandardResilienceHandler.
 
             // Turn on service discovery by default
             http.AddServiceDiscovery();

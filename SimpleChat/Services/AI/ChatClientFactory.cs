@@ -42,7 +42,10 @@ public sealed class ChatClientFactory
                     throw new InvalidOperationException("OpenAI API key is not configured.");
 
                 model = settings.DefaultModel ?? "gpt-4o-mini";
-                var options = new OpenAIClientOptions();
+                var options = new OpenAIClientOptions
+                {
+                    NetworkTimeout = TimeSpan.FromMinutes(5)
+                };
                 if (!string.IsNullOrWhiteSpace(settings.Endpoint))
                     options.Endpoint = new Uri(settings.Endpoint);
 
@@ -58,7 +61,8 @@ public sealed class ChatClientFactory
                 model = settings.DeploymentName ?? throw new InvalidOperationException("Azure OpenAI deployment name is required.");
                 var azure = new AzureOpenAIClient(
                     new Uri(settings.Endpoint!),
-                    new AzureKeyCredential(settings.ApiKey!));
+                    new AzureKeyCredential(settings.ApiKey!),
+                    new AzureOpenAIClientOptions { NetworkTimeout = TimeSpan.FromMinutes(5) });
                 inner = azure.GetChatClient(model).AsIChatClient();
                 break;
             }
